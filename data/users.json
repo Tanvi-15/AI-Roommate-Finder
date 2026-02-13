@@ -1,0 +1,58 @@
+{
+  "tanvideshpandedc@gmail.com": {
+    "email": "tanvideshpandedc@gmail.com",
+    "name": "Tanvi",
+    "questionnaire": {
+      "living": {
+        "location": "Roxbury Crossing, Boston",
+        "budget_min": 800,
+        "budget_max": 1500,
+        "room_type": "Private room",
+        "bathroom_preference": "Private bathroom",
+        "roommate_gender": "Same gender only",
+        "pets": "I have pets",
+        "smoking": "I smoke"
+      },
+      "personality": {
+        "sleep_schedule": "Early bird (before 10pm)",
+        "cleanliness": 3,
+        "noise_level": "Very quiet, minimal guests",
+        "work_from_home": "Yes, full-time",
+        "introvert_extrovert": 3,
+        "conflict_style": "Direct conversation immediately",
+        "hobbies": "",
+        "dealbreaker": ""
+      }
+    },
+    "created_at": "2026-02-11T22:28:16.532579",
+    "updated_at": "2026-02-11T22:37:35.266404"
+  },
+  "deshpande.tanv@northeastern.edu": {
+    "email": "deshpande.tanv@northeastern.edu",
+    "name": "Tanvi",
+    "questionnaire": {
+      "living": {
+        "location": "Boston",
+        "budget_min": 600,
+        "budget_max": 1000,
+        "room_type": "Shared room",
+        "bathroom_preference": "Shared with 1 person",
+        "roommate_gender": "Same gender only",
+        "pets": "No pets please",
+        "smoking": "Non-smoking household only"
+      },
+      "personality": {
+        "sleep_schedule": "Early bird (before 10pm)",
+        "cleanliness": 3,
+        "noise_level": "Very quiet, minimal guests",
+        "work_from_home": "Yes, full-time",
+        "introvert_extrovert": 3,
+        "conflict_style": "Direct conversation immediately",
+        "hobbies": "",
+        "dealbreaker": ""
+      }
+    },
+    "created_at": "2026-02-11T22:34:09.342176",
+    "updated_at": "2026-02-11T22:34:09.342176"
+  }
+}
