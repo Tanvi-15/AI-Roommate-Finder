@@ -44,10 +44,9 @@ AI-Roommate-Finder/
 ### 1. Clone & install dependencies
 
 ```bash
-git clone <your-repo-url>
+git clone <repo-url>
 cd AI-Roommate-Finder
 pip install -r requirements.txt
-pip install bcrypt PyJWT streamlit-cookies-manager
 ```
 
 ### 2. Configure environment
