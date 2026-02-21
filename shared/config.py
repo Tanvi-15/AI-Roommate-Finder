@@ -21,5 +21,12 @@ GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8501/")
 # Ollama
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:latest")
 
+# Backend 
+BACKEND_HOST = os.getenv("BACKEND_HOST", "localhost")
+BACKEND_PORT = int(os.getenv("BACKEND_PORT", "8000"))
+BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"   # REST API URL
+WS_URL = f"ws://{BACKEND_HOST}:{BACKEND_PORT}"          # WebSocket URL
+
+
 # Debug / Logging - set DEBUG=true to see LLM input/output in terminal
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"

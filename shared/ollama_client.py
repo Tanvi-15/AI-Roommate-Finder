@@ -4,7 +4,7 @@ import logging
 import json
 
 import ollama
-from config import OLLAMA_MODEL, DEBUG
+from .config import OLLAMA_MODEL, DEBUG
 
 # Configure debug logger - outputs to terminal when Streamlit runs
 _logger = logging.getLogger("ollama_client")
@@ -57,7 +57,7 @@ def check_ollama_running() -> bool:
         print(f"Ollama error: {e}")
         return False
 
-def chat(system_prompt: str, messages: list, stream: bool = False):
+def chat(system_prompt: str, messages: list, stream: bool = True):
     """
     Send chat request to Ollama
     

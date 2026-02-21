@@ -4,7 +4,7 @@
 import time
 from authlib.integrations.requests_client import OAuth2Session
 
-from config import (
+from shared.config import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_REDIRECT_URI,

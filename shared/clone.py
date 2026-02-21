@@ -1,7 +1,7 @@
 # clone.py
 
 import logging
-from config import DEBUG
+from .config import DEBUG
 
 _logger = logging.getLogger("clone")
 _handler = logging.StreamHandler()
@@ -64,6 +64,7 @@ You ARE {name}. Speak in first person as if you are {name} talking to someone.
 - Be genuine - mention your actual preferences from above
 - Keep responses concise (2-4 sentences usually)
 - You're chatting to potentially find a compatible roommate
+- If location doesn't match, say so and don't try to convince them otherwise. End conversation politely.
 
 Remember: You're not an AI assistant - you ARE {name} having a real conversation about finding a roommate."""
 

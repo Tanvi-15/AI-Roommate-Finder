@@ -2,11 +2,10 @@
 # MongoDB storage for user data
 
 from datetime import datetime
-
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 
-from config import MONGODB_URI, MONGODB_DATABASE, USERS_COLLECTION
+from .config import MONGODB_URI, MONGODB_DATABASE, USERS_COLLECTION
 
 
 def _get_client():
