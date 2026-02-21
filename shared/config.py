@@ -10,6 +10,7 @@ load_dotenv()
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 MONGODB_DATABASE = os.getenv("MONGODB_DATABASE", "roommate_finder")
 USERS_COLLECTION = "users"
+MATCHES_COLLECTION = "matches"
 
 # Google OAuth - YOU NEED TO PROVIDE THESE
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -30,3 +31,8 @@ WS_URL = f"ws://{BACKEND_HOST}:{BACKEND_PORT}"          # WebSocket URL
 
 # Debug / Logging - set DEBUG=true to see LLM input/output in terminal
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+
+# Session persistence (JWT in cookie) - set a long random secret in production
+JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production-use-secrets-token-urlsafe-32")
+SESSION_COOKIE_NAME = "roommate_session"
+SESSION_DAYS = int(os.getenv("SESSION_DAYS", "14"))
