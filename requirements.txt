@@ -28,7 +28,7 @@ MarkupSafe==3.0.3
 narwhals==2.16.0
 numpy==2.2.6
 ollama==0.6.1
-packaging @ file:///opt/miniconda3/conda-bld/packaging_1761049079158/work
+# packaging @ file:///opt/miniconda3/conda-bld/packaging_1761049079158/work
 pandas==2.3.3
 pillow==12.1.1
 protobuf==6.33.5

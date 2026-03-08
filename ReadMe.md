@@ -18,7 +18,8 @@ AI-Roommate-Finder/
 ├── auth.py                 # Google OAuth + Email/Password authentication
 ├── session_utils.py        # JWT session tokens for cookie persistence
 ├── backend/
-│   └── server.py           # FastAPI backend with WebSocket support
+│   └── server.py           # FastAPI backend + WebSocket + Auth API
+├── frontend/               # React UI (Vite + shadcn/ui) — alternative to Streamlit
 ├── shared/
 │   ├── config.py           # Environment variables & constants
 │   ├── database.py         # MongoDB — users + matches collections
@@ -84,16 +85,34 @@ ollama serve
 ollama pull gemma3  # if not already pulled
 ```
 
-### 4. Run the app (two terminals)
+### 4. Run the app
+
+**Option A — React frontend (recommended)**
 
 ```bash
 # Terminal 1 — FastAPI backend
-python backend/server.py
+python "backend /server.py"
+
+# Terminal 2 — React frontend
+cd frontend && npm install && npm run dev
+```
+
+Open `http://localhost:8080` in your browser.
+
+**Option B — Streamlit frontend**
+
+```bash
+# Terminal 1 — FastAPI backend
+python "backend /server.py"
 
 # Terminal 2 — Streamlit frontend
 streamlit run app.py
 ```
 
 Open `http://localhost:8501` in your browser.
+
+**Google OAuth:** Set `GOOGLE_REDIRECT_URI` to match your frontend:
+- React: `http://localhost:8080/auth/callback`
+- Streamlit: `http://localhost:8501/`
 
 

@@ -15,13 +15,23 @@ from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import ollama
 
-from shared.config import BACKEND_PORT, OLLAMA_MODEL, DEBUG
-from shared.clone import generate_clone_prompt
+from shared.config import BACKEND_PORT, OLLAMA_MODEL, DEBUG, FRONTEND_URL, SESSION_COOKIE_NAME
+from shared.database import save_user, get_user, update_last_login
+from auth import (
+    register_user,
+    login_with_password,
+    get_google_auth_url,
+    exchange_code_for_user,
+    is_google_configured,
+)
+from session_utils import create_session_token, validate_session_token
+from shared.clone import generate_clone_prompt, get_clone_intro
 from shared.database import (
     save_match_to_db,
     get_matches_for_user_from_db,
@@ -33,9 +43,11 @@ from shared.database import (
 
 app = FastAPI(title="AI Roommate Finder - Backend")
 
+# CORS: with credentials, origins must be explicit (not "*")
+_cors_origins = [FRONTEND_URL, "http://localhost:8501", "http://127.0.0.1:8080", "http://127.0.0.1:8501"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -191,6 +203,33 @@ class RoomCreate(BaseModel):
 class MatchFilter(BaseModel):
     user_id: str
     include_incompatible: bool = False
+
+
+class AuthRegister(BaseModel):
+    email: str
+    password: str
+    name: str
+    phone_number: str | None = None
+
+
+class AuthLogin(BaseModel):
+    email: str
+    password: str
+
+
+class AuthGoogleCallback(BaseModel):
+    code: str
+    state: str
+
+
+class CloneChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class CloneChatRequest(BaseModel):
+    message: str
+    history: List[CloneChatMessage] = []
 
 
 # ============== Agent Class ==============
@@ -467,6 +506,114 @@ def get_matches_for_user(user_id: str, include_incompatible: bool = False) -> li
     return get_matches_for_user_from_db(user_id, include_incompatible)
 
 
+# ============== Auth Endpoints ==============
+
+def _set_session_cookie(response: JSONResponse, email: str) -> None:
+    """Set the session cookie on the response."""
+    token = create_session_token(email)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=14 * 24 * 3600,  # 14 days
+    )
+
+
+def _get_current_user(request: Request):
+    """Return current user from session or raise 401."""
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    email = validate_session_token(token) if token else None
+    if not email:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = get_user(email)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+@app.post("/auth/register")
+async def auth_register(data: AuthRegister):
+    result = register_user(
+        email=data.email,
+        password=data.password,
+        name=data.name,
+        phone_number=data.phone_number,
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    user = result["user"]
+    resp = JSONResponse(content={"user": user})
+    _set_session_cookie(resp, user["email"])
+    return resp
+
+
+@app.post("/auth/login")
+async def auth_login(data: AuthLogin):
+    result = login_with_password(data.email, data.password)
+    if not result["success"]:
+        raise HTTPException(status_code=401, detail=result["error"])
+    user = result["user"]
+    resp = JSONResponse(content={"user": user})
+    _set_session_cookie(resp, user["email"])
+    return resp
+
+
+@app.get("/auth/google/url")
+async def auth_google_url():
+    if not is_google_configured():
+        return {"url": None}
+    url, _ = get_google_auth_url()
+    return {"url": url}
+
+
+@app.post("/auth/google/callback")
+async def auth_google_callback(data: AuthGoogleCallback):
+    user_info = exchange_code_for_user(data.code, data.state)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="Google login failed")
+    email = user_info["email"]
+    existing = get_user(email)
+    if existing:
+        update_last_login(
+            email,
+            google_id=user_info.get("google_id"),
+            profile_picture=user_info.get("profile_picture_url"),
+        )
+        user = get_user(email)
+    else:
+        save_user(
+            email=email,
+            name=user_info["name"],
+            questionnaire={},
+            google_id=user_info.get("google_id"),
+            profile_picture=user_info.get("profile_picture_url"),
+        )
+        user = get_user(email)
+    resp = JSONResponse(content={"user": user})
+    _set_session_cookie(resp, email)
+    return resp
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request):
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    email = validate_session_token(token) if token else None
+    if not email:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = get_user(email)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return {"user": user}
+
+
+@app.post("/auth/logout")
+async def auth_logout():
+    resp = JSONResponse(content={"ok": True})
+    resp.delete_cookie(SESSION_COOKIE_NAME)
+    return resp
+
+
 # ============== REST Endpoints ==============
 
 @app.get("/")
@@ -476,6 +623,40 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/clone/intro")
+async def clone_intro(request: Request):
+    """Get the clone's greeting message for the current user. Requires auth."""
+    user = _get_current_user(request)
+    if not user.get("questionnaire") or not isinstance(user["questionnaire"], dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Complete your profile (questionnaire) first.",
+        )
+    intro = get_clone_intro(user.get("name", "User"))
+    return {"intro": intro}
+
+
+@app.post("/clone/chat")
+async def clone_chat(request: Request, data: CloneChatRequest):
+    """Chat with the current user's AI clone. Requires auth and a completed questionnaire."""
+    user = _get_current_user(request)
+    if not user.get("questionnaire") or not isinstance(user["questionnaire"], dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Complete your profile (questionnaire) first so your clone can represent you.",
+        )
+    agent = Agent(
+        user_id=user["email"],
+        name=user.get("name", "User"),
+        questionnaire=user["questionnaire"],
+    )
+    # Restore conversation history so the clone has context
+    agent.history = [{"role": m.role, "content": m.content} for m in data.history]
+    reply = await agent.get_response(data.message)
+    return {"reply": reply}
+
 
 @app.post("/agents")
 async def create_agent(data: AgentCreate):

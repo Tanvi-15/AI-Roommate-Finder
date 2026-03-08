@@ -16,8 +16,12 @@ MATCHES_COLLECTION = "matches"
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 # Redirect URI - must match what you set in Google Cloud Console
-# For local Streamlit: http://localhost:8501/
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8501/")
+# For Streamlit: http://localhost:8501/
+# For React frontend: http://localhost:8080/auth/callback
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8080/auth/callback")
+
+# Frontend URL for CORS - React: http://localhost:8080 | Streamlit: http://localhost:8501
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
 
 # Ollama
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:latest")
