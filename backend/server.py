@@ -65,7 +65,11 @@ UPLOAD_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) /
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # CORS: with credentials, origins must be explicit (not "*")
-_cors_origins = [FRONTEND_URL, "http://localhost:8501", "http://127.0.0.1:8080", "http://127.0.0.1:8501"]
+_cors_origins = [
+    FRONTEND_URL,
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -443,12 +447,28 @@ class ChatRoom:
                 phase_turn_count = 0
                 self._advance_phase()
 
+                new_phase = self._current_phase()
+
+                # Force-inject DEALBREAKERS before negotiation so agents
+                # always have full non-negotiable context for conflict resolution
+                if new_phase["name"] == "negotiation":
+                    self.agent_a._inject_module("DEALBREAKERS")
+                    self.agent_b._inject_module("DEALBREAKERS")
+
+                # Before conclusion: inject ALL remaining modules so the
+                # verdict is based on complete information. Without this,
+                # agents could declare "strong" while skipping entire domains.
+                if new_phase["name"] == "conclusion":
+                    for mod in LAZY_MODULES:
+                        self.agent_a._inject_module(mod)
+                        self.agent_b._inject_module(mod)
+
                 # Broadcast phase transition so the UI can show it
                 if self.current_phase_index < len(PHASES):
                     await broadcast(self.room_id, {
                         "type": "phase_start",
-                        "phase": self._current_phase()["name"],
-                        "label": self._current_phase()["label"],
+                        "phase": new_phase["name"],
+                        "label": new_phase["label"],
                     })
 
             # End conversation after conclusion phase completes
@@ -602,7 +622,8 @@ def _set_session_cookie(response: JSONResponse, email: str) -> None:
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
-        samesite="lax",
+        samesite="none",
+        secure=True,
         max_age=14 * 24 * 3600,  # 14 days
     )
 
