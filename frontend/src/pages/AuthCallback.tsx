@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
 
 export default function AuthCallback() {
   const [params] = useSearchParams();
@@ -12,7 +13,12 @@ export default function AuthCallback() {
     const state = params.get('state');
     if (code && state) {
       googleCallback(code, state)
-        .then(() => navigate('/'))
+        .then((result: any) => {
+          if (result?.linked_existing) {
+            toast.success('Logged into your existing account via Google');
+          }
+          navigate('/');
+        })
         .catch(() => navigate('/login'));
     } else {
       navigate('/login');

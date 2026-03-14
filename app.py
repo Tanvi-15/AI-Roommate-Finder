@@ -16,7 +16,7 @@ from shared.database import (
     update_last_login, test_connection,
 )
 from shared.clone import generate_clone_prompt
-from shared.ollama_client import check_ollama_running, chat, chat_stream
+from shared.groq_client import check_ollama_running, chat, chat_stream
 from shared.config import BACKEND_URL, WS_URL, SESSION_COOKIE_NAME
 from auth import (
     get_google_auth_url, exchange_code_for_user,
@@ -410,9 +410,9 @@ def render_home():
             st.code("python backend/server.py", language="bash")
     with col2:
         if check_ollama_running():
-            st.success("✅ Ollama running")
+            st.success("✅ Groq ready")
         else:
-            st.error("❌ Ollama offline")
+            st.error("❌ Groq not configured (set GROQ_API_KEY in .env)")
     with col3:
         if user.get("questionnaire"):
             st.success("✅ Profile complete")
@@ -474,7 +474,7 @@ def render_my_clone():
     user = st.session_state.user_data
 
     if not check_ollama_running():
-        st.error("Ollama is not running. Start it with: `ollama serve`")
+        st.error("Groq is not configured. Add GROQ_API_KEY to your .env file.")
         return
 
     if not user.get("questionnaire"):

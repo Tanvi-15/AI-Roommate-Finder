@@ -6,8 +6,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { matchesApi } from '@/lib/api';
-import { Mail, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
+import { matchesApi, API_URL } from '@/lib/api';
+import { Mail, Calendar, ChevronDown, ChevronUp, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
 
@@ -30,6 +30,11 @@ export default function MyMatchesPage() {
 
   const otherName = (m: any) => m.user_a_id === user?.email ? m.user_b_name : m.user_a_name;
   const otherEmail = (m: any) => m.user_a_id === user?.email ? m.user_b_id : m.user_a_id;
+  const otherPhoto = (m: any) => {
+    const photos = m.other_photos || [];
+    if (photos.length > 0) return `${API_URL}${photos[0]}`;
+    return m.other_profile_picture || null;
+  };
 
   return (
     <AppLayout>
@@ -63,7 +68,15 @@ export default function MyMatchesPage() {
                 <Card className="border-0 shadow-card overflow-hidden">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
-                      <div className="flex-1">
+                      <div className="flex items-center gap-3 flex-1">
+                        {otherPhoto(m) ? (
+                          <img src={otherPhoto(m)} alt={otherName(m)} className="w-12 h-12 rounded-full object-cover shrink-0" />
+                        ) : (
+                          <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center shrink-0">
+                            <User size={20} className="text-muted-foreground" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3">
                           <p className="font-display font-semibold text-lg">{otherName(m)}</p>
                           <StatusBadge status={m.status} />
@@ -82,6 +95,7 @@ export default function MyMatchesPage() {
                         {m.status === 'incompatible' && m.reason && (
                           <p className="mt-1 text-sm text-destructive">{m.reason}</p>
                         )}
+                        </div>
                       </div>
                       <Button variant="ghost" size="sm" onClick={() => setExpanded(isExpanded ? null : m.match_id)}>
                         {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}

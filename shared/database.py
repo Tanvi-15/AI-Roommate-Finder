@@ -5,7 +5,10 @@ from datetime import datetime
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 
-from .config import MONGODB_URI, MONGODB_DATABASE, USERS_COLLECTION, MATCHES_COLLECTION
+import os
+from .config import MONGODB_URI, MONGODB_DATABASE, USERS_COLLECTION, MATCHES_COLLECTION, INTERACTIONS_COLLECTION
+
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 
 def _get_client():
@@ -25,6 +28,13 @@ def _get_matches_collection():
     client = _get_client()
     db = client[MONGODB_DATABASE]
     return db[MATCHES_COLLECTION]
+
+
+def _get_interactions_collection():
+    """Get interactions collection (likes/passes)"""
+    client = _get_client()
+    db = client[MONGODB_DATABASE]
+    return db[INTERACTIONS_COLLECTION]
 
 
 def _ensure_index():
@@ -77,6 +87,9 @@ def save_user(
         doc["created_at"] = now
         col.insert_one(doc)
 
+    if DEBUG and questionnaire:
+        db_name = col.database.name
+        print(f"[DB] Questionnaire saved for {email} in database: {db_name!r}, collection: {col.name!r}")
     return True
 
 
@@ -237,3 +250,59 @@ def get_match_counts_for_user(user_id: str) -> dict:
             counts[r["_id"]] = r["count"]
     counts["total"] = sum(counts.values())
     return counts
+
+
+# ─────────────────────────────────────────────
+# INTERACTIONS (likes / passes)
+# ─────────────────────────────────────────────
+
+def save_interaction(user_email: str, target_email: str, action: str) -> bool:
+    """Save a like/pass interaction. Upserts so repeated actions just update."""
+    col = _get_interactions_collection()
+    col.update_one(
+        {"user_email": user_email, "target_email": target_email},
+        {"$set": {
+            "user_email": user_email,
+            "target_email": target_email,
+            "action": action,
+            "timestamp": datetime.utcnow().isoformat(),
+        }},
+        upsert=True,
+    )
+    return True
+
+
+def get_interacted_emails(user_email: str) -> set:
+    """Return set of emails the user has already liked or passed."""
+    col = _get_interactions_collection()
+    docs = col.find({"user_email": user_email}, {"target_email": 1})
+    return {d["target_email"] for d in docs}
+
+
+def has_interaction(user_email: str, target_email: str) -> bool:
+    """Check if an interaction already exists between two users."""
+    col = _get_interactions_collection()
+    return col.find_one({"user_email": user_email, "target_email": target_email}) is not None
+
+
+# ─────────────────────────────────────────────
+# PHOTOS
+# ─────────────────────────────────────────────
+
+def save_photos_for_user(email: str, photo_urls: list) -> bool:
+    """Save photo URLs for a user (max 2)."""
+    col = _get_collection()
+    col.update_one(
+        {"email": email},
+        {"$set": {"photos": photo_urls[:2], "updated_at": datetime.utcnow().isoformat()}},
+    )
+    return True
+
+
+def get_user_photos(email: str) -> list:
+    """Get photo URLs for a user."""
+    col = _get_collection()
+    user = col.find_one({"email": email}, {"photos": 1})
+    if user:
+        return user.get("photos", [])
+    return []

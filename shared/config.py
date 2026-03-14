@@ -11,6 +11,7 @@ MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 MONGODB_DATABASE = os.getenv("MONGODB_DATABASE", "roommate_finder")
 USERS_COLLECTION = "users"
 MATCHES_COLLECTION = "matches"
+INTERACTIONS_COLLECTION = "interactions"
 
 # Google OAuth - YOU NEED TO PROVIDE THESE
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -23,8 +24,8 @@ GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8080/au
 # Frontend URL for CORS - React: http://localhost:8080 | Streamlit: http://localhost:8501
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
 
-# Ollama
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:latest")
+# LLM (Groq)
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # Backend 
 BACKEND_HOST = os.getenv("BACKEND_HOST", "localhost")

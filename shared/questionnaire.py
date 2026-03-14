@@ -4,11 +4,32 @@
 # SECTION 1: LIVING PREFERENCES
 # ─────────────────────────────────────────────
 
+CITY_OPTIONS = [
+    "Boston", "Cambridge", "Somerville", "Brookline", "Allston", "Brighton",
+    "Medford", "Watertown", "Newton", "Quincy",
+    "New York", "Brooklyn", "Queens", "Manhattan", "Bronx",
+    "San Francisco", "Oakland", "Berkeley", "San Jose", "Palo Alto",
+    "Los Angeles", "Chicago", "Seattle", "Austin", "Denver",
+    "Portland", "Philadelphia", "Washington DC", "Miami", "Atlanta",
+    "Other",
+]
+
 LIVING_PREFERENCES = {
-    "location": {
-        "question": "What city/area are you looking to live in?",
+    "city": {
+        "question": "What city are you looking to live in?",
+        "type": "select",
+        "options": CITY_OPTIONS,
+        "required": True,
+    },
+    "neighborhood": {
+        "question": "Neighborhood or specific area (optional)",
         "type": "text",
-        "placeholder": "e.g., Boston, Cambridge, Roxbury",
+        "placeholder": "e.g., South Boston, Back Bay, Downtown",
+    },
+    "occupation": {
+        "question": "What is your occupation?",
+        "type": "select",
+        "options": ["Student", "Working Professional", "Freelancer / Self-employed", "Between jobs", "Other"],
         "required": True,
     },
     "gender": {
@@ -78,6 +99,12 @@ LIVING_PREFERENCES = {
         "question": "Smoking preference",
         "type": "select",
         "options": ["I smoke", "Okay with smokers", "Non-smoking household only"],
+        "required": True,
+    },
+    "drinking": {
+        "question": "Drinking habits",
+        "type": "select",
+        "options": ["Never", "Socially", "Regularly"],
         "required": True,
     },
 }

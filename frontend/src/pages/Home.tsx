@@ -28,7 +28,7 @@ export default function HomePage() {
   const cards = [
     { to: '/questionnaire', icon: FileText, title: 'Edit Profile', desc: 'Update your questionnaire', color: 'text-primary' },
     { to: '/clone', icon: Bot, title: 'Chat with My Clone', desc: 'Talk to your AI clone to verify it represents you', color: 'text-primary' },
-    { to: '/match/setup', icon: Zap, title: 'Setup Match', desc: 'Find compatibility with another user', color: 'text-secondary' },
+    { to: '/match/setup', icon: Zap, title: 'Setup Match', desc: 'Browse & like profiles near you', color: 'text-secondary' },
     { to: '/matches', icon: Users, title: `My Matches (${matchCount})`, desc: 'View your match results', color: 'text-primary' },
   ];
 

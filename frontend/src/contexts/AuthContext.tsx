@@ -47,8 +47,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const googleCallback = useCallback(async (code: string, state: string) => {
-    const { user } = await authApi.googleCallback(code, state);
-    setUser(user);
+    const result = await authApi.googleCallback(code, state);
+    setUser(result.user);
+    return result;
   }, []);
 
   const logout = useCallback(async () => {

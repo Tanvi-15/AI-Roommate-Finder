@@ -10,19 +10,22 @@ import os
 import asyncio
 import uuid
 import re
+import shutil
+from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response, Request, UploadFile, File
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import ollama
 
-from shared.config import BACKEND_PORT, OLLAMA_MODEL, DEBUG, FRONTEND_URL, SESSION_COOKIE_NAME
-from shared.database import save_user, get_user, update_last_login
+from shared.config import BACKEND_PORT, DEBUG, FRONTEND_URL, SESSION_COOKIE_NAME
+from shared.groq_client import chat as llm_chat
+from shared.database import save_user, get_user, update_last_login, get_all_users, save_photos_for_user, get_user_photos
 from auth import (
     register_user,
     login_with_password,
@@ -32,16 +35,34 @@ from auth import (
 )
 from session_utils import create_session_token, validate_session_token
 from shared.clone import generate_clone_prompt, get_clone_intro
+from shared.module_registry import (
+    extract_module_request,
+    get_module,
+    build_compressed_profile_summary,
+    LAZY_MODULES,
+)
 from shared.database import (
     save_match_to_db,
     get_matches_for_user_from_db,
     get_match_by_id_from_db,
     get_match_counts_for_user,
+    save_interaction,
+    get_interacted_emails,
 )
 
+import logging
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(name)s] %(levelname)s — %(message)s",
+    datefmt="%H:%M:%S",
+)
 # ============== FastAPI App ==============
 
 app = FastAPI(title="AI Roommate Finder - Backend")
+
+UPLOAD_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "uploads" / "photos"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # CORS: with credentials, origins must be explicit (not "*")
 _cors_origins = [FRONTEND_URL, "http://localhost:8501", "http://127.0.0.1:8080", "http://127.0.0.1:8501"]
@@ -52,6 +73,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR.parent)), name="uploads")
 
 # ============== In-Memory Storage ==============
 
@@ -131,7 +154,10 @@ def detect_outcome(conversation: List[dict]) -> dict:
     incompatible_signals = [
         "difficult fit", "tough fit", "don't think we'd be a good fit",
         "doesn't seem like we're compatible", "not a great match",
-        "dealbreaker", "won't work", "false hope", "hope you find someone"
+        "dealbreaker", "won't work", "false hope", "hope you find someone",
+        "vrd:incompatible", "vrd:[incompatible]",
+        "cnf:loc:incompatible", "loc:incompatible", "location mismatch",
+        "nn conflict", "non-negotiable conflict", "non negotiable conflict",
     ]
     # Conditional signals
     conditional_signals = [
@@ -222,6 +248,12 @@ class AuthGoogleCallback(BaseModel):
     state: str
 
 
+class ProfileUpdate(BaseModel):
+    """Update current user profile (questionnaire and/or name)."""
+    name: Optional[str] = None
+    questionnaire: Optional[dict] = None
+
+
 class CloneChatMessage(BaseModel):
     role: str  # "user" | "assistant"
     content: str
@@ -235,31 +267,76 @@ class CloneChatRequest(BaseModel):
 # ============== Agent Class ==============
 
 class Agent:
-    """AI Clone of a user"""
+    """
+    AI Clone of a user — ACP/1.0 enabled.
+
+    System prompt starts as CORE+LIVING only (~230 tokens).
+    Additional modules are injected into self.injected_modules when the
+    agent emits <<MOD:NAME>> in a response, detected by get_response().
+    """
+
+    # Max history messages to send per turn (truncation keeps last N)
+    HISTORY_WINDOW = 6
 
     def __init__(self, user_id: str, name: str, questionnaire: dict):
         self.user_id = user_id
         self.name = name
         self.questionnaire = questionnaire
+        # ACP/1.0: start with CORE+LIVING only
         self.system_prompt = generate_clone_prompt(name, questionnaire)
+        self.injected_modules: set = {"CORE", "LIVING"}
         self.history: List[dict] = []
 
-    async def get_response(self, message: str) -> str:
-        """Get response from Ollama"""
-        self.history.append({"role": "user", "content": message})
-        messages = [{"role": "system", "content": self.system_prompt}] + self.history
+    def _build_system_prompt(self) -> str:
+        """
+        Return current system prompt: base + any injected module blocks.
+        Modules are appended as they get loaded during conversation.
+        """
+        return self.system_prompt
 
+    def _inject_module(self, mod_name: str) -> None:
+        """Append a module block to the system prompt (once only)."""
+        if mod_name in self.injected_modules:
+            return
+        module_text = get_module(mod_name, self.name, self.questionnaire)
+        if module_text:
+            self.system_prompt += f"\n\n{module_text}"
+            self.injected_modules.add(mod_name)
+            if DEBUG:
+                print(f"[AGENT] Injected {mod_name} for {self.name}")
+
+    def _truncated_history(self) -> List[dict]:
+        """Return last HISTORY_WINDOW messages to prevent context explosion."""
+        return self.history[-self.HISTORY_WINDOW:]
+
+    async def get_response(self, message: str) -> str:
+        """
+        Get response from LLM (Groq).
+        After receiving response, check for <<MOD:X>> and inject if needed.
+        """
+        self.history.append({"role": "user", "content": message})
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        content = await loop.run_in_executor(
             None,
-            lambda: ollama.chat(model=OLLAMA_MODEL, messages=messages)
+            lambda: llm_chat(
+                self._truncated_history(),
+                system_prompt=self._build_system_prompt(),
+            )
         )
-        content = response["message"]["content"]
         self.history.append({"role": "assistant", "content": content})
+
+        # ACP/1.0: detect and fulfill module requests
+        mod_name = extract_module_request(content)
+        if mod_name:
+            self._inject_module(mod_name)
+
         return content
 
     def clear_history(self):
         self.history = []
+        self.injected_modules = {"CORE", "LIVING"}
+        # Reset to initial system prompt on clear
+        self.system_prompt = generate_clone_prompt(self.name, self.questionnaire)
 
 
 # ============== ChatRoom Class ==============
@@ -350,6 +427,13 @@ class ChatRoom:
 
             await broadcast(self.room_id, {"type": "agent_message", "data": msg})
 
+            # End immediately if either agent has already declared incompatibility.
+            # This avoids wasting turns after explicit CNF/VRD conflict markers.
+            immediate_outcome = detect_outcome(self.conversation[-3:])
+            if immediate_outcome.get("status") == "incompatible":
+                self.match_result = immediate_outcome
+                break
+
             current_msg = response
             turn = "b" if turn == "a" else "a"
             phase_turn_count += 1
@@ -381,7 +465,7 @@ class ChatRoom:
         self.is_running = False
 
         # Detect outcome and save match
-        outcome = detect_outcome(self.conversation)
+        outcome = self.match_result or detect_outcome(self.conversation)
         self.match_result = outcome
 
         await broadcast(self.room_id, {
@@ -393,11 +477,21 @@ class ChatRoom:
     async def analyze(self) -> dict:
         """
         Structured compatibility analysis.
-        Returns a dict with sub-scores, highlights, concerns,
-        dealbreaker flag, negotiated middle ground, and recommendation tier.
+        ACP/1.0: uses compressed profile summaries (~100 tokens each)
+        instead of raw questionnaire dicts (~500 tokens each).
+        Also limits conversation to last 10 turns for analysis.
         """
+        # Compressed conversation — last 10 turns sufficient
         conv_text = "\n".join(
-            [f"{m['speaker']}: {m['message']}" for m in self.conversation]
+            [f"{m['speaker']}: {m['message']}" for m in self.conversation[-10:]]
+        )
+
+        # Compressed profiles — ~100 tokens each vs ~500 for raw dict
+        profile_a = build_compressed_profile_summary(
+            self.agent_a.name, self.agent_a.questionnaire
+        )
+        profile_b = build_compressed_profile_summary(
+            self.agent_b.name, self.agent_b.questionnaire
         )
 
         system_prompt = """You are an expert roommate compatibility analyst.
@@ -421,38 +515,31 @@ exact JSON format — no extra text, no markdown, just valid JSON:
   "recommendation_summary": "string (2-3 sentences)"
 }
 
-Scores are 0–100. Be specific — reference actual details from the profiles and conversation.
+Scores are 0-100. Be specific — reference actual details from profiles and conversation.
 dealbreaker_detected is true only if a hard non-negotiable conflict was found.
 middle_ground lists concrete compromises that could make a conditional match work.
 recommendation must be exactly one of: strong, conditional, incompatible."""
 
-        request = f"""
-## {self.agent_a.name}'s Profile:
-{self.agent_a.questionnaire}
+        request = f"""## Profile A:
+{profile_a}
 
-## {self.agent_b.name}'s Profile:
-{self.agent_b.questionnaire}
+## Profile B:
+{profile_b}
 
-## Their Conversation:
+## Conversation (final 10 turns):
 {conv_text}
 """
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        raw = await loop.run_in_executor(
             None,
-            lambda: ollama.chat(
-                model=OLLAMA_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": request},
-                ],
+            lambda: llm_chat(
+                [{"role": "user", "content": request}],
+                system_prompt=system_prompt,
             )
         )
-        raw = response["message"]["content"]
 
-        # Parse JSON — fall back to raw string if the model doesn't comply
         import json
         try:
-            # Strip any accidental markdown fences
             cleaned = re.sub(r"```json|```", "", raw).strip()
             return {"structured": True, "data": json.loads(cleaned)}
         except Exception:
@@ -574,12 +661,20 @@ async def auth_google_callback(data: AuthGoogleCallback):
         raise HTTPException(status_code=401, detail="Google login failed")
     email = user_info["email"]
     existing = get_user(email)
+    linked_existing = False
     if existing:
         update_last_login(
             email,
             google_id=user_info.get("google_id"),
             profile_picture=user_info.get("profile_picture_url"),
         )
+        if existing.get("auth_method") == "email":
+            from shared.database import _get_collection
+            _get_collection().update_one(
+                {"email": email},
+                {"$set": {"auth_method": "email+google"}},
+            )
+            linked_existing = True
         user = get_user(email)
     else:
         save_user(
@@ -590,7 +685,7 @@ async def auth_google_callback(data: AuthGoogleCallback):
             profile_picture=user_info.get("profile_picture_url"),
         )
         user = get_user(email)
-    resp = JSONResponse(content={"user": user})
+    resp = JSONResponse(content={"user": user, "linked_existing": linked_existing})
     _set_session_cookie(resp, email)
     return resp
 
@@ -607,11 +702,119 @@ async def auth_me(request: Request):
     return {"user": user}
 
 
+@app.put("/auth/me")
+async def update_profile(request: Request, body: ProfileUpdate):
+    """Update the current user's profile (name and/or questionnaire). Persists to MongoDB."""
+    user = _get_current_user(request)
+    email = user["email"]
+    name = body.name if body.name is not None else user.get("name", "")
+    questionnaire = body.questionnaire if body.questionnaire is not None else user.get("questionnaire") or {}
+    save_user(
+        email=email,
+        name=name,
+        questionnaire=questionnaire,
+        google_id=user.get("google_id"),
+        profile_picture=user.get("profile_picture_url"),
+        password_hash=user.get("password_hash"),
+        phone_number=user.get("phone_number"),
+    )
+    updated = get_user(email)
+    return {"user": updated}
+
+
 @app.post("/auth/logout")
 async def auth_logout():
     resp = JSONResponse(content={"ok": True})
     resp.delete_cookie(SESSION_COOKIE_NAME)
     return resp
+
+
+@app.post("/auth/me/photos")
+async def upload_photos(request: Request, files: List[UploadFile] = File(...)):
+    """Upload up to 2 photos for the current user."""
+    user = _get_current_user(request)
+    email = user["email"]
+
+    if len(files) > 2:
+        raise HTTPException(400, "Maximum 2 photos allowed")
+
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    photo_urls = []
+
+    for i, file in enumerate(files):
+        if file.content_type not in allowed_types:
+            raise HTTPException(400, f"File type {file.content_type} not allowed")
+        if file.size and file.size > 5 * 1024 * 1024:
+            raise HTTPException(400, "File too large (max 5MB)")
+
+        ext = file.filename.rsplit(".", 1)[-1] if "." in (file.filename or "") else "jpg"
+        safe_email = re.sub(r"[^a-zA-Z0-9]", "_", email)
+        filename = f"{safe_email}_{i}_{uuid.uuid4().hex[:8]}.{ext}"
+        filepath = UPLOAD_DIR / filename
+
+        with open(filepath, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        photo_urls.append(f"/uploads/photos/{filename}")
+
+    save_photos_for_user(email, photo_urls)
+    return {"photos": photo_urls}
+
+
+# ============== Like / Pass Endpoints ==============
+
+class LikeRequest(BaseModel):
+    target_email: str
+
+@app.post("/matches/like")
+async def like_profile(request: Request, body: LikeRequest):
+    """Like a profile — triggers background agent negotiation."""
+    user = _get_current_user(request)
+    current_email = user["email"]
+    target_email = body.target_email
+
+    if current_email == target_email:
+        raise HTTPException(400, "Cannot like yourself")
+
+    target = get_user(target_email)
+    if not target:
+        raise HTTPException(404, "Target user not found")
+
+    save_interaction(current_email, target_email, "like")
+
+    asyncio.create_task(_run_background_negotiation(user, target))
+
+    return {"status": "liked", "message": "Agents will negotiate in the background. Check My Matches for results."}
+
+
+@app.post("/matches/pass")
+async def pass_profile(request: Request, body: LikeRequest):
+    """Pass on a profile — records interaction so it won't show again."""
+    user = _get_current_user(request)
+    save_interaction(user["email"], body.target_email, "pass")
+    return {"status": "passed"}
+
+
+async def _run_background_negotiation(user_a: dict, user_b: dict):
+    """Run a full agent conversation and analysis in the background."""
+    try:
+        agent_a = Agent(user_a["email"], user_a.get("name", "User A"), user_a.get("questionnaire", {}))
+        agent_b = Agent(user_b["email"], user_b.get("name", "User B"), user_b.get("questionnaire", {}))
+
+        room_id = f"bg_{uuid.uuid4().hex[:8]}"
+        room = ChatRoom(room_id, agent_a, agent_b)
+        chat_rooms[room_id] = room
+
+        await room.run_conversation(delay=1.0)
+
+        analysis = await room.analyze()
+        save_match(room, analysis)
+
+        if DEBUG:
+            outcome = room.match_result or {}
+            print(f"[BG-MATCH] {user_a['email']} <-> {user_b['email']}: {outcome.get('status', '?')}")
+    except Exception as e:
+        logging.getLogger("background_match").error(f"Background negotiation failed: {e}")
 
 
 # ============== REST Endpoints ==============
@@ -654,6 +857,8 @@ async def clone_chat(request: Request, data: CloneChatRequest):
     )
     # Restore conversation history so the clone has context
     agent.history = [{"role": m.role, "content": m.content} for m in data.history]
+    # Human preview mode — override ACP to natural language
+    agent.system_prompt += "\n\nIMPORTANT: This is a human preview chat. Respond in natural, friendly language — NOT ACP format. No structured tags."
     reply = await agent.get_response(data.message)
     return {"reply": reply}
 
@@ -683,16 +888,15 @@ async def validate_agent(user_id: str):
     results = []
     for q in test_questions:
         try:
-            messages = [
-                {"role": "system", "content": agent.system_prompt},
-                {"role": "user", "content": q},
-            ]
             loop = asyncio.get_event_loop()
-            resp = await loop.run_in_executor(
+            resp_content = await loop.run_in_executor(
                 None,
-                lambda: ollama.chat(model=OLLAMA_MODEL, messages=messages)
+                lambda q=q, agent=agent: llm_chat(
+                    [{"role": "user", "content": q}],
+                    system_prompt=agent.system_prompt,
+                )
             )
-            results.append({"question": q, "response": resp["message"]["content"], "status": "success"})
+            results.append({"question": q, "response": resp_content, "status": "success"})
         except Exception as e:
             results.append({"question": q, "error": str(e), "status": "failed"})
 
@@ -740,7 +944,14 @@ async def get_room(room_id: str):
 @app.get("/matches")
 async def list_matches(user_id: str, include_incompatible: bool = False):
     """Get all matches for a user. Pass include_incompatible=true to see rejected ones."""
-    return get_matches_for_user_from_db(user_id, include_incompatible)
+    matches = get_matches_for_user_from_db(user_id, include_incompatible)
+    for m in matches:
+        other_id = m["user_b_id"] if m["user_a_id"] == user_id else m["user_a_id"]
+        other_user = get_user(other_id)
+        if other_user:
+            m["other_photos"] = other_user.get("photos", [])
+            m["other_profile_picture"] = other_user.get("profile_picture_url")
+    return matches
 
 @app.get("/matches/counts")
 async def match_counts(user_id: str):
@@ -754,6 +965,119 @@ async def get_match(match_id: str):
     if not match:
         raise HTTPException(404, "Match not found")
     return match
+
+
+@app.get("/users/candidates")
+async def list_candidate_users(request: Request, skip: int = 0, limit: int = 50):
+    """
+    Return candidate users filtered by location and gender preference.
+    Excludes already-interacted (liked/passed) profiles.
+    """
+    current_user = _get_current_user(request)
+    current_email = current_user.get("email", "")
+    current_q = current_user.get("questionnaire") or {}
+    current_living = current_q.get("living") or {}
+
+    current_city = str(current_living.get("city", current_living.get("location", ""))).strip()
+    current_gender = str(current_living.get("gender", "")).strip()
+    current_roommate_gender_pref = str(current_living.get("roommate_gender", "No preference")).strip()
+
+    interacted = get_interacted_emails(current_email)
+
+    METRO_BUCKETS = {
+        "boston-metro": {
+            "boston", "cambridge", "somerville", "allston", "brighton",
+            "brookline", "medford", "watertown", "newton", "quincy",
+        },
+        "sf-bay": {
+            "san francisco", "oakland", "berkeley", "san jose", "palo alto",
+            "mountain view",
+        },
+        "nyc-metro": {
+            "new york", "brooklyn", "queens", "manhattan", "bronx", "staten island",
+        },
+    }
+
+    def _metro_bucket(city: str) -> Optional[str]:
+        c = city.lower().strip()
+        for bucket, names in METRO_BUCKETS.items():
+            if c in names:
+                return bucket
+        return None
+
+    current_bucket = _metro_bucket(current_city)
+
+    def _loc_score(other_city: str) -> int:
+        if not current_city or not other_city:
+            return 0
+        if other_city.lower().strip() == current_city.lower().strip():
+            return 3
+        other_bucket = _metro_bucket(other_city)
+        if current_bucket and other_bucket and current_bucket == other_bucket:
+            return 2
+        return 0
+
+    def _gender_match(other_q: dict) -> bool:
+        """Cross-check gender preferences: A wants B's gender AND B wants A's gender."""
+        other_living = other_q.get("living") or {}
+        other_gender = str(other_living.get("gender", "")).strip()
+        other_pref = str(other_living.get("roommate_gender", "No preference")).strip()
+
+        if current_roommate_gender_pref == "Same gender only":
+            if current_gender and other_gender and current_gender != other_gender:
+                return False
+        if other_pref == "Same gender only":
+            if current_gender and other_gender and current_gender != other_gender:
+                return False
+        return True
+
+    users = get_all_users()
+    candidates = []
+    for u in users:
+        email = u.get("email")
+        if not email or email == current_email:
+            continue
+        if email in interacted:
+            continue
+        questionnaire = u.get("questionnaire") or {}
+        if not isinstance(questionnaire, dict) or not questionnaire:
+            continue
+
+        if not _gender_match(questionnaire):
+            continue
+
+        other_living = questionnaire.get("living") or {}
+        other_city = str(other_living.get("city", other_living.get("location", ""))).strip()
+        score = _loc_score(other_city)
+
+        if score == 0 and current_city:
+            continue
+
+        neighborhood = str(other_living.get("neighborhood", "")).strip()
+
+        candidates.append({
+            "email": email,
+            "name": u.get("name", "Unknown"),
+            "city": other_city,
+            "neighborhood": neighborhood,
+            "questionnaire": questionnaire,
+            "photos": u.get("photos", []),
+            "profile_picture_url": u.get("profile_picture_url"),
+            "same_location": score == 3,
+            "location_match_score": score,
+        })
+
+    candidates.sort(
+        key=lambda x: (
+            -x["location_match_score"],
+            str(x.get("name", "")).lower(),
+            str(x.get("email", "")).lower(),
+        )
+    )
+
+    total = len(candidates)
+    candidates = candidates[skip:skip + limit]
+    return {"candidates": candidates, "total": total, "skip": skip, "limit": limit}
 
 
 # ============== WebSocket Endpoint ==============

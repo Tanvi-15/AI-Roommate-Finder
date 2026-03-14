@@ -29,6 +29,8 @@ export const authApi = {
   googleCallback: (code: string, state: string) =>
     request<{ user: any }>('/auth/google/callback', { method: 'POST', body: JSON.stringify({ code, state }) }),
   me: () => request<{ user: any }>('/auth/me'),
+  updateProfile: (data: { name?: string; questionnaire?: Record<string, unknown> }) =>
+    request<{ user: any }>('/auth/me', { method: 'PUT', body: JSON.stringify(data) }),
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 };
 
@@ -70,5 +72,58 @@ export const cloneApi = {
     request<{ reply: string }>('/clone/chat', {
       method: 'POST',
       body: JSON.stringify({ message, history }),
+    }),
+};
+
+// Users (candidate discovery for Setup Match)
+export const usersApi = {
+  candidates: (skip = 0, limit = 50) =>
+    request<{
+      candidates: {
+        email: string;
+        name: string;
+        city: string;
+        neighborhood: string;
+        questionnaire: Record<string, unknown>;
+        photos: string[];
+        profile_picture_url?: string;
+        same_location: boolean;
+        location_match_score: number;
+      }[];
+      total: number;
+      skip: number;
+      limit: number;
+    }>(`/users/candidates?skip=${skip}&limit=${limit}`),
+};
+
+// Photos
+export const photosApi = {
+  upload: async (files: File[]) => {
+    const formData = new FormData();
+    files.forEach(f => formData.append('files', f));
+    const res = await fetch(`${API_URL}/auth/me/photos`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || `Upload failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ photos: string[] }>;
+  },
+};
+
+// Like / Pass
+export const interactionsApi = {
+  like: (targetEmail: string) =>
+    request<{ status: string; message: string }>('/matches/like', {
+      method: 'POST',
+      body: JSON.stringify({ target_email: targetEmail }),
+    }),
+  pass: (targetEmail: string) =>
+    request<{ status: string }>('/matches/pass', {
+      method: 'POST',
+      body: JSON.stringify({ target_email: targetEmail }),
     }),
 };
