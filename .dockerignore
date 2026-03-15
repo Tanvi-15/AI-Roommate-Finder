@@ -1,0 +1,52 @@
+# .dockerignore
+# Keeps the Docker image lean by excluding files not needed in the container
+
+# Environment files (secrets — never in image)
+.env
+.env.*
+!.env.example
+
+# Frontend (Vercel handles this — not needed in backend container)
+frontend/
+frontend/node_modules/
+frontend/dist/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Git
+.git/
+.gitignore
+
+# Legacy Streamlit app
+app.py
+
+# Data files
+data/
+
+# Uploads (mounted as volume, not baked into image)
+uploads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

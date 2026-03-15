@@ -1,0 +1,47 @@
+# docker-compose.yml
+# Runs two containers:
+#   backend  — FastAPI app (port 8000, internal only)
+#   nginx    — reverse proxy (ports 80 + 443, public facing)
+
+services:
+
+  backend:
+    build: .
+    container_name: roommate_backend
+    restart: always
+    env_file:
+      - .env                          
+    volumes:
+      - uploads_data:/app/uploads     
+    expose:
+      - "8000"                        
+    networks:
+      - roommate_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx:
+    image: nginx:alpine
+    container_name: roommate_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro               # your nginx config
+      - /etc/letsencrypt:/etc/letsencrypt:ro                # SSL certs from certbot (host)
+      - uploads_data:/app/uploads:ro                        # serve photos directly
+    depends_on:
+      - backend
+    networks:
+      - roommate_net
+
+volumes:
+  uploads_data:                       # persistent volume for user photos
+
+networks:
+  roommate_net:
+    driver: bridge
