@@ -17,11 +17,35 @@ export default function LoginPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const EMAIL_REGEX = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+
+  const validateEmail = (value: string) => {
+    if (!value) return '';
+    return EMAIL_REGEX.test(value.trim()) ? '' : 'Please enter a valid email address';
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setEmail(value);
+    if (emailError) setEmailError(validateEmail(value));
+  };
+
+  const handleEmailBlur = () => {
+    setEmailError(validateEmail(email));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    const emailErr = validateEmail(email);
+    if (emailErr) {
+      setEmailError(emailErr);
+      return;
+    }
+    setEmailError('');
     setLoading(true);
     try {
       if (mode === 'register') {
@@ -103,7 +127,16 @@ export default function LoginPage() {
               )}
               <div>
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={handleEmailChange}
+                  onBlur={handleEmailBlur}
+                  required
+                  className={emailError ? 'border-destructive' : ''}
+                />
+                {emailError && <p className="mt-1 text-xs text-destructive">{emailError}</p>}
               </div>
               <div>
                 <Label htmlFor="password">Password</Label>

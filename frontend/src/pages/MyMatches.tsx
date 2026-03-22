@@ -92,8 +92,10 @@ export default function MyMatchesPage() {
                             ))}
                           </div>
                         )}
-                        {m.status === 'incompatible' && m.reason && (
-                          <p className="mt-1 text-sm text-destructive">{m.reason}</p>
+                        {m.status === 'incompatible' && (
+                          <p className="mt-1 text-sm text-destructive cursor-pointer" onClick={() => setExpanded(isExpanded ? null : m.match_id)}>
+                            {isExpanded ? 'Summary shown below' : 'Open to see summary'}
+                          </p>
                         )}
                         </div>
                       </div>
@@ -116,6 +118,12 @@ export default function MyMatchesPage() {
                                 <p className="text-xs capitalize text-muted-foreground">{k}</p>
                               </div>
                             ))}
+                          </div>
+                        )}
+                        {m.analysis?.data?.recommendation_summary && (
+                          <div className="rounded-lg bg-accent p-3">
+                            <p className="text-sm font-semibold mb-1">Summary</p>
+                            <p className="text-sm text-muted-foreground">{m.analysis.data.recommendation_summary}</p>
                           </div>
                         )}
                       </motion.div>
